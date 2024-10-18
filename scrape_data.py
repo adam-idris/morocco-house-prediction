@@ -13,32 +13,42 @@ from random import uniform
 def prepare_url(payment, location):
     """
     Prepares the URL for scraping based on intention of renting/buying 
-    and the location of interest
+    and the location of interest.
 
     Args:
-        payment (str): Either 'rent' or 'sale'
-        location (str): The city or location for scraping properties
+        payment (str): Either 'rent' or 'sale.'
+        location (str): The city or location for scraping properties.
 
     Returns:
-        str: The full URL for the search
+        str: The full URL of the page containing all the listings.
     """
     return 'https://www.mubawab.ma/en/ct/{}/real-estate-for-{}'.format(
         payment, location
     )
 
 def get_links(url, max_pages=20):
+    """
+    Scrapes property links from mubaweb.ma and handles pagination.
+
+    Args:
+        url (str): The base URL containing all the property listings.
+        max_pages (int, optional): Number of pages to scrape. Defaults to 20.
+
+    Returns:
+        list: URLs of all the specific property pages to be scraped.
+    """
     prop_links = []
     
     page = 1  # Start from the first page
     while page <= max_pages:
-        print(f'Scraping links from page {page}...')
         page_url = url + f':p:{page}'
         
         try:
             response = requests.get(page_url)
             response.raise_for_status()  # Raise an error for bad status codes
-            
             soup = BeautifulSoup(response.content, 'html.parser')
+            
+            # Find all the listing links on the page
             listings = soup.find_all('h2', class_='listingTit')
 
             # If no listings are found, break the loop
@@ -52,8 +62,6 @@ def get_links(url, max_pages=20):
                     if link_tag and 'href' in link_tag.attrs:
                         link = link_tag['href']
                         prop_links.append(link)
-                    else:
-                        print(f"Link not found in listing: {listing}")
                 
                 except AttributeError as e:
                     print(f"Error finding a link: {e}")
@@ -84,7 +92,10 @@ def get_links(url, max_pages=20):
 
 def get_details(links):
     full_list = []
-    for counter, link in enumerate(tqdm(links, desc="Fetching property details")):
+    
+    for counter, link in enumerate(tqdm(
+        links, desc="Fetching property details")):
+        
         try:
             counter += 1
             response = requests.get(link)
