@@ -1,5 +1,3 @@
-#---------------------------IMPORTS-------------------------------#
-
 from bs4 import BeautifulSoup
 import requests
 import pandas as pd
@@ -7,10 +5,10 @@ from time import sleep
 import re
 from tqdm import tqdm
 from random import uniform
+import psycopg2
+import logging
 
-#-------------------------PREPARATION-----------------------------#
-
-def prepare_url(payment, location):
+def prepare_url(location, payment):
     """
     Prepares the URL for scraping based on intention of renting/buying 
     and the location of interest.
@@ -26,7 +24,7 @@ def prepare_url(payment, location):
         payment, location
     )
 
-def get_links(url, max_pages=20):
+def get_links(url, max_pages=20, cursor=None):
     """
     Scrapes property links from mubaweb.ma and handles pagination.
 
@@ -53,7 +51,8 @@ def get_links(url, max_pages=20):
 
             # If no listings are found, break the loop
             if not listings:
-                print(f"No listings found on page {page}. Stopping pagination.")
+                print(f"No listings found on page {page}. 
+                      Stopping pagination.")
                 break
 
             for listing in listings:
@@ -61,6 +60,8 @@ def get_links(url, max_pages=20):
                     link_tag = listing.find('a')
                     if link_tag and 'href' in link_tag.attrs:
                         link = link_tag['href']
+                        if cursor and is_url_scraped(cursor, link):
+                            continue  # Skip already scraped links
                         prop_links.append(link)
                 
                 except AttributeError as e:
@@ -80,15 +81,12 @@ def get_links(url, max_pages=20):
             print(f"Request error on page {page}: {req_e}")
             break  # Stop the loop for other request issues
 
-        print('Sleeping for a bit...')
         sleep(uniform(1, 3))  # Random sleep between 1 and 3 seconds
 
         # Increment page counter if there is a next page
         page += 1
 
     return prop_links
-
-#-------------------------FEATURES--------------------------------#
 
 def get_details(links):
     full_list = []
@@ -117,7 +115,8 @@ def get_details(links):
             
             description = soup.find_all('p', class_='adMainFeatureContentValue')
 
-            description_titles = ['Property Type', 'Condition', 'Age', 'Floor', 'Orientation', 'Floor']
+            description_titles = ['Property Type', 'Condition', 'Age', 'Floor', 
+                                  'Orientation', 'Floor']
             descriptor_list = [desc.text.strip() for desc in description]
 
             desc_dict = dict(zip(description_titles, descriptor_list))
@@ -129,19 +128,23 @@ def get_details(links):
             for detail in details:
                 # Check for size (since it's the first one with 'm²')
                 if 'm²' in detail.text:
-                    size = detail.find('span').text.strip().replace('m²', '').strip()
+                    size = detail.find('span').text.strip().replace(
+                        'm²', '').strip()
                 
                 # Check for number of pieces
                 if 'Pieces' in detail.text:
-                    rooms = detail.find('span').text.strip().replace('Pieces', '').strip()
+                    rooms = detail.find('span').text.strip().replace(
+                        'Pieces', '').strip()
                 
                 # Check for number of rooms
                 if 'Rooms' in detail.text:
-                    bedrooms = detail.find('span').text.strip().replace('Rooms', '').strip()
+                    bedrooms = detail.find('span').text.strip().replace(
+                        'Rooms', '').strip()
                 
                 # Check for number of bathrooms
                 if 'Bathrooms' in detail.text:
-                    bathrooms = detail.find('span').text.strip().replace('Bathrooms', '').strip()
+                    bathrooms = detail.find('span').text.strip().replace(
+                        'Bathrooms', '').strip()
                     
             features = soup.find_all('span', class_='fSize11 centered')
             feature_list = [feature.text.strip() for feature in features]   
