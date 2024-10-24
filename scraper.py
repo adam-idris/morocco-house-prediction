@@ -1,3 +1,5 @@
+from data_cleaning import clean_price, clean_size, clean_integer, clean_text
+from database import is_url_scraped
 from bs4 import BeautifulSoup
 import requests
 import pandas as pd
@@ -5,7 +7,6 @@ from time import sleep
 import re
 from tqdm import tqdm
 from random import uniform
-import psycopg2
 import logging
 
 def prepare_url(location, payment):
@@ -75,102 +76,121 @@ def get_links(url, max_pages=20, cursor=None):
         
         except requests.exceptions.HTTPError as http_err:
             print(f"HTTP error occurred on page {page}: {http_err}")
-            break  # Stop the loop if we hit an HTTP error (like 404)
+            break  # Stop the loop if we hit an HTTP error
         
         except requests.RequestException as req_e:
             print(f"Request error on page {page}: {req_e}")
             break  # Stop the loop for other request issues
-
-        sleep(uniform(1, 3))  # Random sleep between 1 and 3 seconds
+        
+        # Random sleep between 1 and 3 seconds to prevent overloading the server
+        sleep(uniform(1, 3))
 
         # Increment page counter if there is a next page
         page += 1
 
     return prop_links
 
-def get_details(links):
+def get_details(links, cursor):
+    """
+    Scrapes the important features of each property.
+
+    Args:
+        links (str): The URLs of each property to be scraped.
+
+    Returns:
+        DataFrame: A pandas DataFrame containing all the features of the 
+        property
+    """
     full_list = []
     
-    for counter, link in enumerate(tqdm(
-        links, desc="Fetching property details")):
-        
+    for link in tqdm(links, desc="Fetching property details"):
+        if is_url_scraped(cursor, link):
+            continue
         try:
-            counter += 1
             response = requests.get(link)
             soup = BeautifulSoup(response.content, 'html.parser')
 
-            price = soup.find('h3', class_='orangeTit').text.strip()
+            raw_price = soup.find('h3', class_='orangeTit').text.strip()
+            raw_area_text = soup.find('h3', class_='greyTit').text.strip()
+            raw_title = soup.find('h1', class_='searchTitle').text.strip()
             
-            area_text = soup.find('h3', class_='greyTit').text.strip()
+            price = clean_price(raw_price)
+            title = clean_text(raw_title)
+            
             pattern = r'^(.*)\sin\s(.*)$'
 
             # Use re.search to match both the area and the city
-            match = re.search(pattern, area_text)
+            match = re.search(pattern, raw_area_text)
 
             if match:
                 area = match.group(1).strip()  # First group: Area
                 city = match.group(2).strip()  # Second group: City
+            else:
+                area = city = None
             
-            title = soup.find('h1', class_='searchTitle').text.strip()
+            div_block = soup.find('div', class_='blockProp')
+            if div_block:
+                p_tag = div_block.find('p')
+                if p_tag:
+                    text_content = p_tag.get_text(separator=" ").strip()
             
-            description = soup.find_all('p', class_='adMainFeatureContentValue')
-
-            description_titles = ['Property Type', 'Condition', 'Age', 'Floor', 
-                                  'Orientation', 'Floor']
-            descriptor_list = [desc.text.strip() for desc in description]
-
+            description = soup.find_all(
+                'p', class_='adMainFeatureContentValue')
+            
+            description_titles = ['Property Type', 'Condition', 'Age', 
+                                  'Floor', 'Orientation', 'Floor']
+            descriptor_list = [clean_text(desc.text) for desc in description]
             desc_dict = dict(zip(description_titles, descriptor_list))
             
-            size, rooms, bedrooms, bathrooms = None, None, None, None
-
+            size = rooms = bedrooms = bathrooms = None
+            # This is extra info like size, number of rooms etc.
             details = soup.find_all('div', class_='adDetailFeature')
 
             for detail in details:
+                text = detail.text.strip()
+                value = detail.find('span').text.strip()
+                
                 # Check for size (since it's the first one with 'm²')
-                if 'm²' in detail.text:
-                    size = detail.find('span').text.strip().replace(
-                        'm²', '').strip()
+                if 'm²' in text:
+                    size = clean_size(value)
                 
-                # Check for number of pieces
-                if 'Pieces' in detail.text:
-                    rooms = detail.find('span').text.strip().replace(
-                        'Pieces', '').strip()
+                # Check for number of rooms (called pieces on site)
+                if 'Pieces' in text:
+                    rooms = clean_integer(value)
                 
-                # Check for number of rooms
-                if 'Rooms' in detail.text:
-                    bedrooms = detail.find('span').text.strip().replace(
-                        'Rooms', '').strip()
+                # Check for number of bedrooms
+                if 'Rooms' in text:
+                    bedrooms = clean_integer(value)
                 
                 # Check for number of bathrooms
-                if 'Bathrooms' in detail.text:
-                    bathrooms = detail.find('span').text.strip().replace(
-                        'Bathrooms', '').strip()
+                if 'Bathrooms' in text:
+                    bathrooms = clean_integer(value)
                     
             features = soup.find_all('span', class_='fSize11 centered')
-            feature_list = [feature.text.strip() for feature in features]   
-            feature_str = ', '.join(feature_list)
+            feature_list = [clean_text(feature.text) for feature in features]   
+            feature_str = ', '.join(filter(None, feature_list))
                      
             property_details = {
-                                'Title': title,
-                                'City' : city, 
-                                'Area': area, 
-                                'Size': size, 
-                                'Rooms': rooms, 
-                                'Bedrooms': bedrooms, 
-                                'Bathrooms': bathrooms, 
-                                'Price': price,
-                                'Features': feature_str
+                                'title': title,
+                                'description': text_content,
+                                'city' : city, 
+                                'area': area, 
+                                'size': size, 
+                                'rooms': rooms, 
+                                'bedrooms': bedrooms, 
+                                'bathrooms': bathrooms, 
+                                'price': price,
+                                'features': feature_str,
+                                'property_type': desc_dict.get('Property Type'),
+                                'condition': desc_dict.get('Condition'),
+                                'age': desc_dict.get('Age'),
+                                'url': link
                                 }
             
-            all_details = {**property_details, **desc_dict}
-            
-            full_list.append(all_details)
-            
+            full_list.append(property_details)
             sleep(uniform(1, 3))
             
-        except requests.RequestException as req_e:
-            print(f'Error fetching property data: {req_e}')
-        except AttributeError as attr_e:
-            print(f'Missing element in the page: {attr_e}')
+        except Exception as e:
+            logging.error(f'Error fetching property data from {link}: {e}')
             
     return pd.DataFrame(full_list)
