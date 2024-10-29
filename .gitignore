@@ -1,1 +1,9 @@
 .env
+casablanca.csv
+data_analysis.ipynb
+properties.csv
+property_data.csv
+property_data.pkl
+scrape_data.ipynb
+test.ipynb
+test.py
