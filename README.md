@@ -1,4 +1,4 @@
-# Morocco Property Scraper and Prediction
+# Morocco Real Estate Scraper and Prediction
 
 An end-to-end data pipeline project aimed at scraping real estate listings from a Moroccan property website, cleaning and storing the data in a PostgreSQL database hosted on AWS, and performing exploratory data analysis (EDA) to predict house prices.
 
