@@ -1,5 +1,8 @@
 import re
 import pandas as pd
+import math
+import pandas as pd
+from datetime import datetime
 
 def clean_integer(number_str):
     """
@@ -13,13 +16,12 @@ def clean_integer(number_str):
         int or None: The cleaned price as an integer, or None if invalid.
     """
     
+    if not number_str:
+        return None
     try:
-        if not number_str:
-            return None
-        number_clean = re.sub(r'[^0-9]', '', number_str)
-        if number_clean == '':
-            return None
-        return int(number_clean)
+        # Remove all non-digit characters
+        number_str = re.sub(r'[^\d]', '', number_str)
+        return int(number_str)
     except ValueError:
         return None
     
@@ -105,3 +107,28 @@ def drop_no_price(df):
     print(f"Dropped {initial_count - final_count} rows without a price.")
     
     return df
+
+def safe_int(value):
+    if value is None or (isinstance(value, float) and math.isnan(value)):
+        return None
+    return int(value)
+
+def clean_property_data(prop):
+    # Clean size
+    prop['size'] = safe_int(prop.get('size'))
+
+    # Clean price
+    prop['price'] = safe_int(prop.get('price'))
+
+    # Clean rooms, bedrooms, bathrooms
+    for field in ['rooms', 'bedrooms', 'bathrooms']:
+        prop[field] = safe_int(prop.get(field))
+
+    # Ensure date_published is a date object
+    date_published = prop.get('date_published')
+    if isinstance(date_published, (pd.Timestamp, datetime)):
+        prop['date_published'] = date_published.date()
+    else:
+        prop['date_published'] = None
+
+    return prop

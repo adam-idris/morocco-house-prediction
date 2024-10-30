@@ -11,20 +11,20 @@ from tqdm import tqdm
 from random import uniform
 import logging
 
-def prepare_url(payment, location):
+def prepare_url(location, payment):
     """
     Prepares the URL for scraping based on intention of renting/buying 
     and the location of interest.
 
     Args:
-        payment (str): Either 'rent' or 'sale.'
         location (str): The city or location for scraping properties.
+        payment (str): Either 'rent' or 'sale.'
 
     Returns:
         str: The full URL of the page containing all the listings.
     """
     return 'https://www.mubawab.ma/en/ct/{}/real-estate-for-{}:o:n'.format(
-        payment, location
+        location, payment
     )
 
 def extract_publication_date(detail):
@@ -36,10 +36,10 @@ def extract_publication_date(detail):
                 published_text = i_tag.next_sibling.strip('Published ').strip()
                 
                 if published_text == 'today':
-                    publication_date = dt.today().strftime('%d-%m-%Y')
+                    publication_date = dt.today()
                 else:
                     days_ago = clean_integer(published_text)
-                    publication_date = (dt.today() - datetime.timedelta(days=days_ago)).strftime('%d-%m-%Y')
+                    publication_date = (dt.today() - datetime.timedelta(days=days_ago))
                     
                 return publication_date
         
@@ -51,7 +51,7 @@ def extract_publication_date(detail):
         logging.error(f'Error extracting publication date: {e}')
         return None
 
-def get_links(url, max_pages=20):
+def get_links(url, max_pages=20, cursor=None):
     """
     Scrapes property links from mubaweb.ma and handles pagination.
 
@@ -63,7 +63,6 @@ def get_links(url, max_pages=20):
         list: URLs of all the specific property pages to be scraped.
     """
     prop_links = []
-    
     page = 1  # Start from the first page
     while page <= max_pages:
         page_url = url + f':p:{page}'
@@ -78,7 +77,7 @@ def get_links(url, max_pages=20):
 
             # If no listings are found, break the loop
             if not listings:
-                print(f"No listings found on page {page}. Stopping pagination.")
+                logging.info(f"No listings found on page {page}. Stopping pagination.")
                 break
 
             for listing in listings:
@@ -89,6 +88,9 @@ def get_links(url, max_pages=20):
                     else:
                         continue
                     
+                    if cursor and is_url_scraped(cursor, link):
+                        continue
+                    
                     detail = listing.find('div', class_='controlBar sMargTop')
                     publication_date = extract_publication_date(detail)
 
@@ -96,26 +98,24 @@ def get_links(url, max_pages=20):
                     prop_links.append((link, publication_date))
                 
                 except AttributeError as e:
-                    print(f"Error finding a link: {e}")
+                    logging.error(f"Error finding a link: {e}")
 
             # Check if there is a "Next" page
             next_page = soup.find('a', class_='arrowDot')
             if not next_page:
-                print("No 'Next' page found. Stopping pagination.")
+                logging.info("No 'Next' page found. Stopping pagination.")
                 break
             
+            page += 1
             # Random sleep between 1 and 3 seconds to prevent overloading the server
             sleep(uniform(1, 3))
-
-            # Increment page counter if there is a next page
-            page += 1
             
         except requests.exceptions.HTTPError as http_err:
-            print(f"HTTP error occurred on page {page}: {http_err}")
+            logging.error(f"HTTP error occurred on page {page}: {http_err}")
             break  # Stop the loop if we hit an HTTP error
         
         except requests.RequestException as req_e:
-            print(f"Request error on page {page}: {req_e}")
+            logging.error(f"Request error on page {page}: {req_e}")
             break  # Stop the loop for other request issues
 
     return prop_links
@@ -126,6 +126,7 @@ def get_details(links_with_dates):
 
     Args:
         links (str): The URLs of each property to be scraped.
+        cursor (psycopg2.extensions.cursor): The database cursor.
 
     Returns:
         DataFrame: A pandas DataFrame containing all the features of the 
@@ -156,6 +157,7 @@ def get_details(links_with_dates):
             else:
                 area = city = None
             
+            text_content = None
             div_block = soup.find('div', class_='blockProp')
             if div_block:
                 p_tag = div_block.find('p')
@@ -204,6 +206,7 @@ def get_details(links_with_dates):
             property_details = {
                                 'title': title,
                                 'description': text_content,
+                                'property_type': desc_dict.get('Property Type'),
                                 'city' : city, 
                                 'area': area, 
                                 'size': size, 
@@ -212,7 +215,6 @@ def get_details(links_with_dates):
                                 'bathrooms': bathrooms, 
                                 'price': price,
                                 'features': feature_str,
-                                'property_type': desc_dict.get('Property Type'),
                                 'condition': clean_condition(desc_dict.get('Condition')),
                                 'age': clean_age(desc_dict.get('Age')),
                                 'date_published': publication_date,
