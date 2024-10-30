@@ -146,3 +146,18 @@ def close_database(conn, cursor):
         logging.info('Database connection closed.')
     except Exception as e:  
         logging.error(f'Error closing database connection: {e}')
+        
+def connect_db():
+    try:
+        conn = psycopg2.connect(
+                host=os.environ['DB_HOST'],
+                database=os.environ['DB_NAME'],
+                user=os.environ['DB_USER'],
+                password=os.environ['DB_PASS'],
+                port=os.environ['DB_PORT']
+        )
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        return conn, cursor
+    except Exception as e:
+        print(f"Error connecting to the database: {e}")
+        raise

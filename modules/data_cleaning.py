@@ -3,6 +3,7 @@ import pandas as pd
 import math
 import pandas as pd
 from datetime import datetime
+import logging
 
 def clean_integer(number_str):
     """
@@ -132,3 +133,20 @@ def clean_property_data(prop):
         prop['date_published'] = None
 
     return prop
+
+def parse_area_and_city(raw_area_text):
+    if not raw_area_text:
+        logging.warning("raw_area_text is None or empty.")
+        return None, None
+    raw_area_text = raw_area_text.strip()
+    pattern = r'^(.*)\s+in\s+(.*)$'
+    match = re.search(pattern, raw_area_text, re.IGNORECASE)
+    if match:
+        area = match.group(1).strip()
+        city = match.group(2).strip()
+        logging.debug(f"Parsed area: '{area}', city: '{city}' from raw_area_text: '{raw_area_text}'")
+    else:
+        area = None
+        city = raw_area_text.strip()
+        logging.debug(f"No 'in' found. Set area to None and city to '{city}' from raw_area_text: '{raw_area_text}'")
+    return area, city

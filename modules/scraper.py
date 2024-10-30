@@ -1,4 +1,4 @@
-from data_cleaning import clean_integer, clean_text, clean_age, clean_rooms, clean_condition
+from data_cleaning import *
 from datetime import datetime as dt
 import datetime
 from database import is_url_scraped
@@ -146,16 +146,7 @@ def get_details(links_with_dates):
             price = clean_integer(raw_price)
             title = clean_text(raw_title)
             
-            pattern = r'^(.*)\sin\s(.*)$'
-
-            # Use re.search to match both the area and the city
-            match = re.search(pattern, raw_area_text)
-
-            if match:
-                area = match.group(1).strip()  # First group: Area
-                city = match.group(2).strip()  # Second group: City
-            else:
-                area = city = None
+            area, city = parse_area_and_city(raw_area_text)
             
             text_content = None
             div_block = soup.find('div', class_='blockProp')
@@ -228,3 +219,17 @@ def get_details(links_with_dates):
             logging.error(f'Error fetching property data from {link}: {e}')
             
     return pd.DataFrame(full_list)
+
+def fetch_raw_area_text_from_url(url):
+    try:
+        response = requests.get(url)
+        response.raise_for_status()  # Raise an error for bad status codes
+        soup = BeautifulSoup(response.content, 'html.parser')
+        raw_area_text_element = soup.find('h3', class_='greyTit')
+        if raw_area_text_element:
+            return raw_area_text_element.text.strip()
+        else:
+            return None
+    except Exception as e:
+        logging.error(f"Error fetching raw_area_text from URL {url}: {e}")
+        return None
