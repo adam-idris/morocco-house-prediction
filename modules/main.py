@@ -3,44 +3,37 @@ from database import *
 import logging
 import pandas as pd
 
-def main():
-    cities = [
-        "casablanca", "rabat", "dar-bouazza", "mohammédia", "meknès", "bouznika", 
-        "oujda", "berrechid", "sidi-rahal", "safi", "harhoura", "tamesna", 
-        "al-hoceïma", "sidi-rahal-chatai", "deroua", "sidi-bouknadel", "ait-melloul", 
-        "sidi-allal-el-bahraoui", "tiznit", "ain-attig", "sidi-abdallah-ghiat", 
-        "ksar-sghir", "sidi-bouzid", "bir-jdid", "marrakech", "agadir", "kénitra", 
-        "témara", "el-jadida", "martil", "asilah", "saïdia", "nador", "m'diq", 
-        "nouaceur", "béni-mellal", "mehdia", "chefchaouen", "taghazout", 
-        "taroudant", "ourika", "oued-laou", "médiouna", "berkane", "tiflet", 
-        "ifrane", "khémisset", "taza", "tanger", "bouskoura", "fès", "salé", 
-        "essaouira", "tétouan", "el-mansouria", "benslimane", "skhirat", "el-menzeh", 
-        "had-soualem", "zenata", "errahma", "settat", "cabo-negro", "larache", 
-        "fnideq", "tit-mellil", "ain-aouda", "azemmour", "khouribga", "ben-guerir", 
-        "azrou", "ouarzazate"
-    ]
-    conn = None
-    cursor = None
+CITIES = [
+"casablanca"
+]
+
+def process_city(city, cursor):
+    """Process property listings for a given city."""
     try:
-        # Initialise the database connection once
+        url = prepare_url(city, 'rent')
+        links = get_links(url, max_pages=1, cursor=cursor)
+        if not links:
+            logging.info(f'No new property links found for {city}.')
+            return
+
+        properties = get_details(links, city)
+        if properties.empty:
+            logging.info(f'No new properties to insert for {city}.')
+        else:
+            insert_properties(cursor, properties.to_dict('records'))
+    except Exception as e:
+        logging.error(f'Error processing {city}: {e}', exc_info=True)
+
+def main():
+    """Main function to process property data for each city."""
+    conn, cursor = None, None
+    try:
         conn, cursor = initialise_database()
-        for city in cities:
-            try:
-                url = prepare_url(city, 'rent')
-                links = get_links(url, max_pages=50, cursor=cursor)
-                if links:
-                    properties = get_details(links)
-                    if not properties.empty:
-                        insert_properties(cursor, properties.to_dict('records'))
-                    else:
-                        logging.info('No new properties to insert.')
-                else:
-                    logging.info('No new property links found.')
-            except Exception as e:
-                logging.error(f'An error occurred: {e}')
+        for city in CITIES:
+            process_city(city, cursor)
         conn.commit()
     except Exception as e:
-        logging.error(f'An error occurred during database initialization: {e}', exc_info=True)
+        logging.error(f'Database initialization error: {e}', exc_info=True)
     finally:
         if conn and cursor:
             close_database(conn, cursor)

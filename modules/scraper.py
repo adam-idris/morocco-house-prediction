@@ -1,83 +1,71 @@
-from data_cleaning import *
-from datetime import datetime as dt
-import datetime
-from database import is_url_scraped
+import logging
+import pandas as pd
+import re
+from datetime import datetime as dt, timedelta
+from random import uniform
+from time import sleep
+from tqdm import tqdm
 from bs4 import BeautifulSoup
 import requests
-import pandas as pd
-from time import sleep
-import re
-from tqdm import tqdm
-from random import uniform
-import logging
+from data_cleaning import *
+from database import is_url_scraped
 
-def prepare_url(location, payment):
-    """
-    Prepares the URL for scraping based on intention of renting/buying 
-    and the location of interest.
 
-    Args:
-        location (str): The city or location for scraping properties.
-        payment (str): Either 'rent' or 'sale.'
+# --- URL and Page Helpers ---
+def prepare_url(city, payment):
+    """Creates URL for the property listings page based on city and payment"""
+    return f'https://www.mubawab.ma/en/ct/{city}/real-estate-for-{payment}:o:n'
 
-    Returns:
-        str: The full URL of the page containing all the listings.
-    """
-    return 'https://www.mubawab.ma/en/ct/{}/real-estate-for-{}:o:n'.format(
-        location, payment
-    )
 
+def fetch_raw_area_text_from_url(url, city):
+    """Extracts area and city text from a fallback URL in case of failure."""
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        raw_area_text_element = soup.find('h3', class_='greyTit')
+        return raw_area_text_element.text.strip() if raw_area_text_element else None
+    except Exception as e:
+        logging.error(
+            f"Error fetching raw_area_text from {city} URL {url}: {e}")
+        return None
+
+
+# --- Data Extraction Helpers ---
 def extract_publication_date(detail):
+    """Extracts and returns the publication date from listing detail."""
     try:
         span = detail.find('span', class_='listingDetails iconPadR')
         if span:
-            i_tag = span.find('i')
-            if i_tag and i_tag.next_sibling:
-                published_text = i_tag.next_sibling.strip('Published ').strip()
-                
-                if published_text == 'today':
-                    publication_date = dt.today()
-                else:
-                    days_ago = clean_integer(published_text)
-                    publication_date = (dt.today() - datetime.timedelta(days=days_ago))
-                    
-                return publication_date
-        
-        else:
-            publication_date = None
+            published_text = span.find('i').next_sibling.strip(
+                'Published ').strip()
+            if published_text == 'today':
+                return dt.today()
+            days_ago = clean_integer(published_text)
+            return dt.today() - datetime.timedelta(days=days_ago)
         return None
-    
     except Exception as e:
         logging.error(f'Error extracting publication date: {e}')
         return None
 
-def get_links(url, max_pages=20, cursor=None):
-    """
-    Scrapes property links from mubaweb.ma and handles pagination.
 
-    Args:
-        url (str): The base URL containing all the property listings.
-        max_pages (int, optional): Number of pages to scrape. Defaults to 20.
-
-    Returns:
-        list: URLs of all the specific property pages to be scraped.
-    """
+def get_links(url, city, max_pages=20, cursor=None):
+    """Scrapes property links from multiple pages on the site."""
     prop_links = []
-    page = 1  # Start from the first page
-    while page <= max_pages:
-        page_url = url + f':p:{page}'
-        
+    for page in range(1, max_pages + 1):
         try:
+            page_url = url + f':p:{page}'
             response = requests.get(page_url)
             response.raise_for_status()  # Raise an error for bad status codes
             soup = BeautifulSoup(response.content, 'html.parser')
             
             # Find all the listing links on the page
             listings = soup.find_all('li', class_='listingBox')
-
             # If no listings are found, break the loop
             if not listings:
-                logging.info(f"No listings found on page {page}. Stopping pagination.")
+                logging.info(
+                    f"No listings found on page {page}. Stopping pagination."
+                )
                 break
 
             for listing in listings:
@@ -87,54 +75,25 @@ def get_links(url, max_pages=20, cursor=None):
                         link = link_tag['href']
                     else:
                         continue
-                    
                     if cursor and is_url_scraped(cursor, link):
                         continue
-                    
-                    detail = listing.find('div', class_='controlBar sMargTop')
-                    publication_date = extract_publication_date(detail)
-
-                    # Append to list
+                    publication_date = extract_publication_date(
+                        listing.find('div', class_='controlBar sMargTop')
+                    )
                     prop_links.append((link, publication_date))
+                sleep(uniform(1, 3))
                 
-                except AttributeError as e:
-                    logging.error(f"Error finding a link: {e}")
-
-            # Check if there is a "Next" page
-            next_page = soup.find('a', class_='arrowDot')
-            if not next_page:
-                logging.info("No 'Next' page found. Stopping pagination.")
-                break
-            
-            page += 1
-            # Random sleep between 1 and 3 seconds to prevent overloading the server
-            sleep(uniform(1, 3))
-            
-        except requests.exceptions.HTTPError as http_err:
-            logging.error(f"HTTP error occurred on page {page}: {http_err}")
-            break  # Stop the loop if we hit an HTTP error
-        
-        except requests.RequestException as req_e:
-            logging.error(f"Request error on page {page}: {req_e}")
-            break  # Stop the loop for other request issues
-
+        except requests.RequestException as e:
+            logging.error(f"Request error for {city} on page {page}: {e}")
+            break
     return prop_links
 
-def get_details(links_with_dates):
-    """
-    Scrapes the important features of each property.
 
-    Args:
-        links (str): The URLs of each property to be scraped.
-        cursor (psycopg2.extensions.cursor): The database cursor.
-
-    Returns:
-        DataFrame: A pandas DataFrame containing all the features of the 
-        property
-    """
+def get_details(links_with_dates, city):
+    """Scrapes and returns property details from each property link."""
     full_list = []
-    
-    for link, publication_date in tqdm(links_with_dates, desc="Fetching property details"):
+    for link, publication_date in tqdm(
+        links_with_dates, desc=f"Fetching property details from {city}"):
         try:
             response = requests.get(link)
             soup = BeautifulSoup(response.content, 'html.parser')
@@ -186,7 +145,7 @@ def get_details(links_with_dates):
                 if 'Bathrooms' in text or 'Bathroom' in text:
                     bathrooms = clean_integer(value)
                     
-            # If there are no rooms extracted, the function searches the description
+            # function searches the description if no rooms were extracted
             if rooms is None and text_content:
                 rooms = clean_rooms(text_content)
                     
@@ -206,7 +165,8 @@ def get_details(links_with_dates):
                                 'bathrooms': bathrooms, 
                                 'price': price,
                                 'features': feature_str,
-                                'condition': clean_condition(desc_dict.get('Condition')),
+                                'condition': clean_condition(
+                                    desc_dict.get('Condition')),
                                 'age': clean_age(desc_dict.get('Age')),
                                 'date_published': publication_date,
                                 'url': link
@@ -221,6 +181,17 @@ def get_details(links_with_dates):
     return pd.DataFrame(full_list)
 
 def fetch_raw_area_text_from_url(url):
+    """
+    Extracts the text of the area and city directly from the url. It is a 
+    fallback option, if the text isn't extracted properly initially.
+
+    Args:
+        url (str): url of the listing the area text needs to be extracted 
+        from.
+
+    Returns:
+        raw_area_text (str): The text containing area and city information.
+    """
     try:
         response = requests.get(url)
         response.raise_for_status()  # Raise an error for bad status codes

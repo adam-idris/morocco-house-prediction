@@ -7,3 +7,4 @@ property_df.pkl
 scrape_data.ipynb
 test.ipynb
 test.py
+**/__pycache__
