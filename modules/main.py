@@ -27,7 +27,7 @@ def main():
         for city in cities:
             try:
                 url = prepare_url(city, 'rent')
-                links = get_links(url, max_pages=50, cursor=cursor)
+                links = get_links(url, max_pages=2, cursor=cursor)
                 if links:
                     properties = get_details(links)
                     if not properties.empty:

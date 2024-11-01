@@ -1,0 +1,15 @@
+2024-10-31 17:04:22,151 - ERROR - Error connecting to the database: 'DB_HOST'
+2024-10-31 17:04:22,151 - ERROR - Database initialization error: 'DB_HOST'
+Traceback (most recent call last):
+  File "/Users/adamidris/Coding/morocco-house-prediction/main.py", line 43, in main
+    conn, cursor = initialise_database()
+  File "/Users/adamidris/Coding/morocco-house-prediction/modules/database.py", line 21, in initialise_database
+    host=os.environ['DB_HOST'],
+  File "/Users/adamidris/miniconda3/envs/mubaweb-scraper/lib/python3.10/os.py", line 680, in __getitem__
+    raise KeyError(key) from None
+KeyError: 'DB_HOST'
+2024-10-31 17:42:16,049 - INFO - Database connection closed.
+2024-10-31 17:47:35,211 - INFO - Database connection closed.
+2024-10-31 19:01:06,751 - INFO - Database connection closed.
+2024-10-31 19:05:16,546 - INFO - Database connection closed.
+2024-10-31 19:13:02,091 - INFO - Database connection closed.
